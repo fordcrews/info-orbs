@@ -13,29 +13,164 @@ void ClockWidget::setup() {
     m_lastDisplay2Digit = "";
     m_lastDisplay4Digit = "";
     m_lastDisplay5Digit = "";
+
+    // Schedule a glitch in 30-60 seconds
+    m_nextGlitchTime = millis() + random(30000, 60000);
 }
+
+void ClockWidget::triggerRandomGlitch() {
+    // Pick a random digit out of {0,1,3,4}
+    int possibleDigits[4] = {0,1,3,4};
+    int d = possibleDigits[random(0,4)];
+    m_glitchEnabledForDigit[d] = true;
+    // Next glitch in another 30-60 seconds
+    m_nextGlitchTime = millis() + random(30000, 60000);
+}
+
+
+void ClockWidget::startDigitAnimation(int index, int oldDigit, int newDigit) {
+    m_digitAnimating[index] = true;
+    m_digitAnimationStart[index] = millis();
+    m_digitAnimationOld[index] = oldDigit;
+    m_digitAnimationNew[index] = newDigit;
+    m_digitAnimationCurrent[index] = oldDigit;
+    m_digitAnimationStep[index] = 0;
+
+    // If glitch is enabled for this digit, activate glitch
+    if (m_glitchEnabledForDigit[index]) {
+        startGlitchForDigit(index);
+    }
+}
+
+void ClockWidget::startGlitchForDigit(int index) {
+    m_glitchActiveForDigit[index] = true;
+    // Let's say we do 3-5 glitch steps
+    m_glitchStepsRemaining[index] = random(3,6); 
+}
+
+bool ClockWidget::updateDigitAnimation(int index, unsigned long now) {
+    if (!m_digitAnimating[index]) return false;
+
+    unsigned long elapsed = now - m_digitAnimationStart[index];
+
+    if (m_glitchActiveForDigit[index]) {
+        int totalGlitchTime = (m_glitchStepsRemaining[index]) * GLITCH_STEP_DURATION;
+        if (elapsed >= totalGlitchTime) {
+            m_glitchActiveForDigit[index] = false;
+            m_glitchEnabledForDigit[index] = false;
+            m_digitAnimationStart[index] = now;
+            elapsed = 0; 
+        } else {
+            return true; 
+        }
+    }
+
+    int stepsPassed = elapsed / DIGIT_ANIMATION_STEP_DURATION;
+    if (stepsPassed > m_digitAnimationStep[index]) {
+        m_digitAnimationStep[index] = stepsPassed;
+
+        // Step logic:
+        // Step 0: colon_off
+        // Step 1: show 9
+        // Step 2+: decrement until we reach newDigit
+
+        if (m_digitAnimationStep[index] == 0) {
+            // First step: show colon_off
+            // We'll represent colon_off by a special marker, say -1 internally,
+            // and handle its drawing in getCurrentDisplayedDigit() or display function.
+            m_digitAnimationCurrent[index] = -1; 
+        } else {
+            // After colon_off, we either switch to 9 if we're at step 1,
+            // or decrement from current if step > 1
+            if (m_digitAnimationStep[index] == 1) {
+                // Switch directly to 9
+                m_digitAnimationCurrent[index] = 9;
+            } else {
+                // Decrement from whatever the current digit is (except if it's colon_off)
+                if (m_digitAnimationCurrent[index] == -1) {
+                    // If for some reason we were still colon_off, just set to 9 now.
+                    m_digitAnimationCurrent[index] = 9;
+                } else {
+                    // Decrement normally
+                    m_digitAnimationCurrent[index] = (m_digitAnimationCurrent[index] - 1 + 10) % 10;
+                }
+            }
+
+            // Check if we've reached the new digit
+            if (m_digitAnimationCurrent[index] == m_digitAnimationNew[index]) {
+                m_digitAnimating[index] = false;
+            }
+        }
+    }
+
+    return m_digitAnimating[index];
+}
+
+int ClockWidget::getCurrentDisplayedDigit(int index) {
+    if (!m_digitAnimating[index]) {
+        // Not animating, just show the correct digit
+        switch (index) {
+            case 0: return (m_hourSingle < 10 && FORMAT_24_HOUR) ? 0 : (m_hourSingle/10);
+            case 1: return (m_hourSingle % 10);
+            case 3: return (m_minuteSingle < 10) ? 0 : (m_minuteSingle/10);
+            case 4: return (m_minuteSingle % 10);
+        }
+    } else {
+        if (m_glitchActiveForDigit[index]) {
+            // Show a random glitch digit
+            return random(0,10);
+        } else {
+            // Show the animation current digit
+            return m_digitAnimationCurrent[index];
+        }
+    }
+    // Default fallback
+    return 0;
+}
+
 
 void ClockWidget::draw(bool force) {
     m_manager.setFont(CLOCK_FONT);
-    GlobalTime *time = GlobalTime::getInstance();
 
-    if (m_lastDisplay1Digit != m_display1Digit || force) {
-        displayDigit(0, m_lastDisplay1Digit, m_display1Digit, CLOCK_COLOR);
-        m_lastDisplay1Digit = m_display1Digit;
+    unsigned long now = millis();
+
+    // Update animations for each digit
+    // This will advance steps if needed
+    bool a0 = updateDigitAnimation(0, now);
+    bool a1 = updateDigitAnimation(1, now);
+    bool a3 = updateDigitAnimation(3, now);
+    bool a4 = updateDigitAnimation(4, now);
+
+    // Get the current displayed digits (either glitching, animating or normal)
+    int d0 = getCurrentDisplayedDigit(0);
+    int d1 = getCurrentDisplayedDigit(1);
+    int d3 = getCurrentDisplayedDigit(3);
+    int d4 = getCurrentDisplayedDigit(4);
+
+    String display0 = (d0 == -1) ? "colon_off" : String(d0);
+    String display1 = (d1 == -1) ? "colon_off" : String(d1);
+    String display3 = (d3 == -1) ? "colon_off" : String(d3);
+    String display4 = (d4 == -1) ? "colon_off" : String(d4);
+
+    // Update actual display if changed
+    if (m_lastDisplay1Digit != display0 || force) {
+        displayDigit(0, m_lastDisplay1Digit, display0, CLOCK_COLOR);
+        m_lastDisplay1Digit = display0;
     }
-    if (m_lastDisplay2Digit != m_display2Digit || force) {
-        displayDigit(1, m_lastDisplay2Digit, m_display2Digit, CLOCK_COLOR);
-        m_lastDisplay2Digit = m_display2Digit;
+    if (m_lastDisplay2Digit != display1 || force) {
+        displayDigit(1, m_lastDisplay2Digit, display1, CLOCK_COLOR);
+        m_lastDisplay2Digit = display1;
     }
-    if (m_lastDisplay4Digit != m_display4Digit || force) {
-        displayDigit(3, m_lastDisplay4Digit, m_display4Digit, CLOCK_COLOR);
-        m_lastDisplay4Digit = m_display4Digit;
+    if (m_lastDisplay4Digit != display3 || force) {
+        displayDigit(3, m_lastDisplay4Digit, display3, CLOCK_COLOR);
+        m_lastDisplay4Digit = display3;
     }
-    if (m_lastDisplay5Digit != m_display5Digit || force) {
-        displayDigit(4, m_lastDisplay5Digit, m_display5Digit, CLOCK_COLOR);
-        m_lastDisplay5Digit = m_display5Digit;
+    if (m_lastDisplay5Digit != display4 || force) {
+        displayDigit(4, m_lastDisplay5Digit, display4, CLOCK_COLOR);
+        m_lastDisplay5Digit = display4;
     }
 
+    // Handle colon, AM/PM, etc. as before...
     if (m_secondSingle != m_lastSecondSingle || force) {
         if (m_secondSingle % 2 == 0) {
             displayDigit(2, "", ":", CLOCK_COLOR, false);
@@ -49,7 +184,6 @@ void ClockWidget::draw(bool force) {
         m_lastSecondSingle = m_secondSingle;
         if (!FORMAT_24_HOUR && SHOW_AM_PM_INDICATOR && m_type != ClockType::NIXIE) {
             if (m_amPm != m_lastAmPm) {
-                // Clear old AM/PM
                 displayAmPm(m_lastAmPm, TFT_BLACK);
                 m_lastAmPm = m_amPm;
             }
@@ -57,6 +191,7 @@ void ClockWidget::draw(bool force) {
         }
     }
 }
+
 
 void ClockWidget::displayAmPm(String &amPm, uint32_t color) {
     m_manager.selectScreen(2);
@@ -88,29 +223,39 @@ void ClockWidget::update(bool force) {
     m_secondSingle = time->getSecond();
     m_amPm = time->isPM() ? "PM" : "AM";
 
-    if (m_lastHourSingle != m_hourSingle || force) {
-        if (m_hourSingle < 10) {
-            if (FORMAT_24_HOUR) {
-                m_display1Digit = "0";
-            } else {
-                m_display1Digit = " ";
-            }
-        } else {
-            m_display1Digit = int(m_hourSingle / 10);
-        }
-        m_display2Digit = m_hourSingle % 10;
-
-        m_lastHourSingle = m_hourSingle;
+    // Trigger a random glitch occasionally
+    if (millis() > m_nextGlitchTime) {
+        triggerRandomGlitch();
     }
 
-    if (m_lastMinuteSingle != m_minuteSingle || force) {
-        String currentMinutePadded = String(m_minuteSingle).length() == 1 ? "0" + String(m_minuteSingle) : String(m_minuteSingle);
+    // Determine old digits
+    int oldHourTens = (m_lastHourSingle < 10 && FORMAT_24_HOUR) ? 0 : (m_lastHourSingle / 10);
+    int oldHourOnes = (m_lastHourSingle % 10);
+    int oldMinTens = (m_lastMinuteSingle < 10) ? 0 : (m_lastMinuteSingle / 10);
+    int oldMinOnes = (m_lastMinuteSingle % 10);
 
-        m_display4Digit = currentMinutePadded.substring(0, 1);
-        m_display5Digit = currentMinutePadded.substring(1, 2);
+    // Determine new digits
+    int newHourTens = (m_hourSingle < 10 && FORMAT_24_HOUR) ? 0 : (m_hourSingle / 10);
+    int newHourOnes = (m_hourSingle % 10);
+    int newMinTens = (m_minuteSingle < 10) ? 0 : (m_minuteSingle / 10);
+    int newMinOnes = (m_minuteSingle % 10);
 
-        m_lastMinuteSingle = m_minuteSingle;
+    // Check for changes and start animations if needed
+    if (newHourTens != oldHourTens && !m_digitAnimating[0]) {
+        startDigitAnimation(0, oldHourTens, newHourTens);
     }
+    if (newHourOnes != oldHourOnes && !m_digitAnimating[1]) {
+        startDigitAnimation(1, oldHourOnes, newHourOnes);
+    }
+    if (newMinTens != oldMinTens && !m_digitAnimating[3]) {
+        startDigitAnimation(3, oldMinTens, newMinTens);
+    }
+    if (newMinOnes != oldMinOnes && !m_digitAnimating[4]) {
+        startDigitAnimation(4, oldMinOnes, newMinOnes);
+    }
+
+    m_lastHourSingle = m_hourSingle;
+    m_lastMinuteSingle = m_minuteSingle;
 }
 
 void ClockWidget::change24hMode() {
@@ -237,6 +382,7 @@ void ClockWidget::displayNixie(int displayIndex, const String &digit) {
     if (digit.length() != 1) {
         return;
     }
+    
     m_manager.selectScreen(displayIndex);
     TJpgDec.setJpgScale(1);
     switch (digit.charAt(0)) {
