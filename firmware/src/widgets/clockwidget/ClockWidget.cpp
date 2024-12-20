@@ -59,9 +59,9 @@ bool ClockWidget::updateDigitAnimation(int index, unsigned long now) {
             m_glitchActiveForDigit[index] = false;
             m_glitchEnabledForDigit[index] = false;
             m_digitAnimationStart[index] = now;
-            elapsed = 0; 
+            elapsed = 0;
         } else {
-            return true; 
+            return true;
         }
     }
 
@@ -69,34 +69,18 @@ bool ClockWidget::updateDigitAnimation(int index, unsigned long now) {
     if (stepsPassed > m_digitAnimationStep[index]) {
         m_digitAnimationStep[index] = stepsPassed;
 
-        // Step logic:
-        // Step 0: colon_off
-        // Step 1: show 9
-        // Step 2+: decrement until we reach newDigit
-
         if (m_digitAnimationStep[index] == 0) {
-            // First step: show colon_off
-            // We'll represent colon_off by a special marker, say -1 internally,
-            // and handle its drawing in getCurrentDisplayedDigit() or display function.
-            m_digitAnimationCurrent[index] = -1; 
+            // Step 0: colon_off
+            m_digitAnimationCurrent[index] = -1;
+        } else if (m_digitAnimationStep[index] == 1) {
+            // Step 1: switch to 9
+            m_digitAnimationCurrent[index] = 9;
         } else {
-            // After colon_off, we either switch to 9 if we're at step 1,
-            // or decrement from current if step > 1
-            if (m_digitAnimationStep[index] == 1) {
-                // Switch directly to 9
-                m_digitAnimationCurrent[index] = 9;
-            } else {
-                // Decrement from whatever the current digit is (except if it's colon_off)
-                if (m_digitAnimationCurrent[index] == -1) {
-                    // If for some reason we were still colon_off, just set to 9 now.
-                    m_digitAnimationCurrent[index] = 9;
-                } else {
-                    // Decrement normally
-                    m_digitAnimationCurrent[index] = (m_digitAnimationCurrent[index] - 1 + 10) % 10;
-                }
-            }
+            // Subsequent steps: decrement by 1 or 2 (based on performance setting)
+            int step = 3;  // Set to 2 to skip every other digit for faster transitions
+            m_digitAnimationCurrent[index] = (m_digitAnimationCurrent[index] - step + 10) % 10;
 
-            // Check if we've reached the new digit
+            // Stop animation if target digit is reached
             if (m_digitAnimationCurrent[index] == m_digitAnimationNew[index]) {
                 m_digitAnimating[index] = false;
             }
@@ -106,27 +90,30 @@ bool ClockWidget::updateDigitAnimation(int index, unsigned long now) {
     return m_digitAnimating[index];
 }
 
+
 int ClockWidget::getCurrentDisplayedDigit(int index) {
     if (!m_digitAnimating[index]) {
-        // Not animating, just show the correct digit
+        // Not animating: return the final digit
         switch (index) {
-            case 0: return (m_hourSingle < 10 && FORMAT_24_HOUR) ? 0 : (m_hourSingle/10);
+            case 0: return (m_hourSingle < 10 && FORMAT_24_HOUR) ? 0 : (m_hourSingle / 10);
             case 1: return (m_hourSingle % 10);
-            case 3: return (m_minuteSingle < 10) ? 0 : (m_minuteSingle/10);
+            case 3: return (m_minuteSingle < 10) ? 0 : (m_minuteSingle / 10);
             case 4: return (m_minuteSingle % 10);
         }
     } else {
         if (m_glitchActiveForDigit[index]) {
             // Show a random glitch digit
-            return random(0,10);
+            return random(0, 10);
         } else {
-            // Show the animation current digit
+            // Show the current animation step
             return m_digitAnimationCurrent[index];
         }
     }
+
     // Default fallback
     return 0;
 }
+
 
 
 void ClockWidget::draw(bool force) {
@@ -135,13 +122,12 @@ void ClockWidget::draw(bool force) {
     unsigned long now = millis();
 
     // Update animations for each digit
-    // This will advance steps if needed
     bool a0 = updateDigitAnimation(0, now);
     bool a1 = updateDigitAnimation(1, now);
     bool a3 = updateDigitAnimation(3, now);
     bool a4 = updateDigitAnimation(4, now);
 
-    // Get the current displayed digits (either glitching, animating or normal)
+    // Get the current displayed digits (either glitching, animating, or normal)
     int d0 = getCurrentDisplayedDigit(0);
     int d1 = getCurrentDisplayedDigit(1);
     int d3 = getCurrentDisplayedDigit(3);
@@ -152,7 +138,7 @@ void ClockWidget::draw(bool force) {
     String display3 = (d3 == -1) ? "colon_off" : String(d3);
     String display4 = (d4 == -1) ? "colon_off" : String(d4);
 
-    // Update actual display if changed
+    // Update the actual display if changed
     if (m_lastDisplay1Digit != display0 || force) {
         displayDigit(0, m_lastDisplay1Digit, display0, CLOCK_COLOR);
         m_lastDisplay1Digit = display0;
@@ -170,28 +156,33 @@ void ClockWidget::draw(bool force) {
         m_lastDisplay5Digit = display4;
     }
 
-    // Handle colon, AM/PM, etc. as before...
+    // Handle colon and seconds
     if (m_secondSingle != m_lastSecondSingle || force) {
+        // Blink colon for seconds
         if (m_secondSingle % 2 == 0) {
             displayDigit(2, "", ":", CLOCK_COLOR, false);
         } else {
             displayDigit(2, "", ":", CLOCK_SHADOW_COLOR, false);
         }
+
+        // Render second hand if enabled
 #if SHOW_SECOND_TICKS == true
-        displaySeconds(2, m_lastSecondSingle, TFT_BLACK);
-        displaySeconds(2, m_secondSingle, CLOCK_COLOR);
+        displaySeconds(2, m_lastSecondSingle, TFT_BLACK);  // Erase previous position
+        displaySeconds(2, m_secondSingle, CLOCK_COLOR);    // Draw at new position
 #endif
+
         m_lastSecondSingle = m_secondSingle;
-        if (!FORMAT_24_HOUR && SHOW_AM_PM_INDICATOR && m_type != ClockType::NIXIE) {
-            if (m_amPm != m_lastAmPm) {
-                displayAmPm(m_lastAmPm, TFT_BLACK);
-                m_lastAmPm = m_amPm;
-            }
-            displayAmPm(m_amPm, CLOCK_COLOR);
+    }
+
+    // Handle AM/PM indicator (if applicable)
+    if (!FORMAT_24_HOUR && SHOW_AM_PM_INDICATOR && m_type != ClockType::NIXIE) {
+        if (m_amPm != m_lastAmPm) {
+            displayAmPm(m_lastAmPm, TFT_BLACK);  // Erase previous
+            m_lastAmPm = m_amPm;
         }
+        displayAmPm(m_amPm, CLOCK_COLOR);  // Draw current
     }
 }
-
 
 void ClockWidget::displayAmPm(String &amPm, uint32_t color) {
     m_manager.selectScreen(2);
