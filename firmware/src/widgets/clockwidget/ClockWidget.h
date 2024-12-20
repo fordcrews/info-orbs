@@ -93,6 +93,7 @@ private:
     int m_digitAnimationNew[5];
     int m_digitAnimationCurrent[5];
     int m_digitAnimationStep[5];
+    bool m_updateAlternate = false;  // Tracks whether to update even or odd digits
 
     // Glitch control
     bool m_glitchEnabledForDigit[5] = {false, false, false, false, false}; // If true, next animation on this digit will glitch
@@ -101,7 +102,7 @@ private:
     unsigned long m_nextGlitchTime = 0;
 
     const unsigned long DIGIT_ANIMATION_STEP_DURATION = 10; // ms per step
-    const unsigned long GLITCH_STEP_DURATION = 100; // ms per glitch step
+    const unsigned long GLITCH_STEP_DURATION = 10; // ms per glitch step
 
     void startDigitAnimation(int index, int oldDigit, int newDigit);
     bool updateDigitAnimation(int index, unsigned long now);
@@ -127,7 +128,7 @@ private:
     int m_timeZoneOffset;
 
     // Delays for setting how often certain screens/functions are refreshed/checked. These include both the frequency which they need to be checked and a varibale to store the last checked value.
-    unsigned long m_secondTimer = 2000; // This time is used to refressh/check the clock every second.
+    unsigned long m_secondTimer = 1000; // This time is used to refressh/check the clock every second.
     unsigned long m_secondTimerPrev = 0;
 
     int m_minuteSingle;
